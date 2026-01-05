@@ -1,0 +1,24 @@
+name: Build Stockfish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Test message
+      run: echo "✅ GitHub Actions работает!"
+      
+    - name: Create test file
+      run: echo "Тест успешен" > test.txt
+      
+    - name: Upload result
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-result
+        path: test.txt
