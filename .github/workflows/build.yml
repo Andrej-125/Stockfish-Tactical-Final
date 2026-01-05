@@ -1,76 +1,55 @@
-name: Build Tactical Stockfish for Windows
+name: Get Stockfish with MultiPV Config
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
-  build-windows:
+  download-and-configure:
     runs-on: windows-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Install MSYS2 and GCC
+    - name: Download Stockfish 16.1
       run: |
-        # Скачиваем и устанавливаем MSYS2
-        curl -OL https://github.com/msys2/msys2-installer/releases/download/2023-03-18/msys2-x86_64-20230318.exe
-        Start-Process -Wait -FilePath ".\msys2-x86_64-20230318.exe" -ArgumentList "install", "--root", "C:/msys64", "--confirm-command"
+        # Скачиваем готовый Stockfish с официального релиза
+        curl -LO "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-windows-x86-64-avx2.zip"
+        7z x stockfish-windows-x86-64-avx2.zip -oStockfish
         
-        # Добавляем MSYS2 в PATH
-        $env:PATH = "C:\msys64\usr\bin;$env:PATH"
-        
-    - name: Install GCC compiler
-      shell: bash
+    - name: Prepare tactical configuration
       run: |
-        # Внутри MSYS2 устанавливаем компилятор
-        pacman -Syu --noconfirm
-        pacman -S --noconfirm git mingw-w64-x86_64-gcc mingw-w64-x86_64-make
+        # Создаем файл с командами для MultiPV=500
+        echo "uci" > stockfish_tactical.uci
+        echo "setoption name MultiPV value 500" >> stockfish_tactical.uci
+        echo "setoption name UCI_Chess960 value true" >> stockfish_tactical.uci
+        echo "setoption name Contempt value 24" >> stockfish_tactical.uci
+        echo "setoption name Aggressiveness value 150" >> stockfish_tactical.uci
+        echo "setoption name Move Overhead value 3000" >> stockfish_tactical.uci
+        echo "setoption name Slow Mover value 80" >> stockfish_tactical.uci
+        echo "isready" >> stockfish_tactical.uci
+        echo "" >> stockfish_tactical.uci
+        echo "# Пример использования:" >> stockfish_tactical.uci
+        echo "# stockfish.exe < stockfish_tactical.uci" >> stockfish_tactical.uci
+        echo "# position startpos" >> stockfish_tactical.uci
+        echo "# go depth 15" >> stockfish_tactical.uci
         
-    - name: Clone Stockfish
-      shell: bash
+    - name: Create batch file for easy start
       run: |
-        git clone --depth 1 https://github.com/official-stockfish/Stockfish.git
-        cd Stockfish/src
-        
-    - name: Build Stockfish for Windows
-      shell: bash
-      run: |
-        cd Stockfish/src
-        # Компилируем с поддержкой AVX2
-        make build ARCH=x86-64-avx2 COMP=mingw -j4
-        
-    - name: Rename to stockfish.exe
-      shell: cmd
-      run: |
-        cd Stockfish\src
-        if exist stockfish.exe (
-          echo "stockfish.exe already exists"
-        ) else (
-          rename stockfish stockfish.exe
-        )
+        # Создаем .bat файл для запуска с настройками
+        echo @echo off > start_tactical.bat
+        echo echo Запуск Stockfish с MultiPV=500 и Chess960 >> start_tactical.bat
+        echo echo. >> start_tactical.bat
+        echo stockfish-windows-x86-64-avx2.exe ^< stockfish_tactical.uci >> start_tactical.bat
+        echo pause >> start_tactical.bat
         
     - name: Upload Stockfish executable
       uses: actions/upload-artifact@v4
       with:
-        name: stockfish-windows-exe
-        path: Stockfish/src/stockfish*.exe
+        name: stockfish-windows
+        path: Stockfish/stockfish-windows-x86-64-avx2.exe
         
-    - name: Create tactical config
-      run: |
-        echo "Stockfish Tactical 2026 Configuration" > README.txt
-        echo "------------------------------------" >> README.txt
-        echo "Commands to run after starting stockfish.exe:" >> README.txt
-        echo "setoption name MultiPV value 500" >> README.txt
-        echo "setoption name UCI_Chess960 value true" >> README.txt
-        echo "setoption name Contempt value 24" >> README.txt
-        echo "setoption name Aggressiveness value 150" >> README.txt
-        echo "isready" >> README.txt
-        
-    - name: Upload config
+    - name: Upload configuration files
       uses: actions/upload-artifact@v4
       with:
-        name: stockfish-config
-        path: README.txt
+        name: stockfish-configs
+        path: |
+          stockfish_tactical.uci
+          start_tactical.bat
