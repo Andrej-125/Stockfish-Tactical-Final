@@ -1,55 +1,220 @@
-name: Get Stockfish with MultiPV Config
+name: Build Custom Tactical Stockfish
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
-  download-and-configure:
-    runs-on: windows-latest
+  build-custom:
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Download Stockfish 16.1
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
       run: |
-        # Скачиваем готовый Stockfish с официального релиза
-        curl -LO "https://github.com/official-stockfish/Stockfish/releases/download/sf_16.1/stockfish-windows-x86-64-avx2.zip"
-        7z x stockfish-windows-x86-64-avx2.zip -oStockfish
+        sudo apt-get update
+        sudo apt-get install -y git g++ make curl
         
-    - name: Prepare tactical configuration
+    - name: Clone Stockfish source
       run: |
-        # Создаем файл с командами для MultiPV=500
-        echo "uci" > stockfish_tactical.uci
-        echo "setoption name MultiPV value 500" >> stockfish_tactical.uci
-        echo "setoption name UCI_Chess960 value true" >> stockfish_tactical.uci
-        echo "setoption name Contempt value 24" >> stockfish_tactical.uci
-        echo "setoption name Aggressiveness value 150" >> stockfish_tactical.uci
-        echo "setoption name Move Overhead value 3000" >> stockfish_tactical.uci
-        echo "setoption name Slow Mover value 80" >> stockfish_tactical.uci
-        echo "isready" >> stockfish_tactical.uci
-        echo "" >> stockfish_tactical.uci
-        echo "# Пример использования:" >> stockfish_tactical.uci
-        echo "# stockfish.exe < stockfish_tactical.uci" >> stockfish_tactical.uci
-        echo "# position startpos" >> stockfish_tactical.uci
-        echo "# go depth 15" >> stockfish_tactical.uci
+        git clone --depth 1 https://github.com/official-stockfish/Stockfish.git
+        cd Stockfish/src
         
-    - name: Create batch file for easy start
+    - name: Create tactical modifications
       run: |
-        # Создаем .bat файл для запуска с настройками
-        echo @echo off > start_tactical.bat
-        echo echo Запуск Stockfish с MultiPV=500 и Chess960 >> start_tactical.bat
-        echo echo. >> start_tactical.bat
-        echo stockfish-windows-x86-64-avx2.exe ^< stockfish_tactical.uci >> start_tactical.bat
-        echo pause >> start_tactical.bat
+        cd Stockfish/src
         
-    - name: Upload Stockfish executable
+        # 1. СОЗДАЕМ ФАЙЛ TACTICAL_FISHER.H
+        cat > tactical_fisher.h << 'EOF'
+        #pragma once
+        #include "types.h"
+        #include "position.h"
+        
+        namespace Stockfish {
+        
+        class TacticalFisher {
+        public:
+            // Тактические параметры
+            static int get_aggressiveness() { return aggressiveness; }
+            static void set_aggressiveness(int value) { aggressiveness = value; }
+            
+            static int get_tactical_awareness() { return tactical_awareness; }
+            static void set_tactical_awareness(int value) { tactical_awareness = value; }
+            
+            static int get_piece_activity() { return piece_activity; }
+            static void set_piece_activity(int value) { piece_activity = value; }
+            
+            static int get_king_safety() { return king_safety; }
+            static void set_king_safety(int value) { king_safety = value; }
+            
+            static int get_pawn_structure() { return pawn_structure; }
+            static void set_pawn_structure(int value) { pawn_structure = value; }
+            
+            static int get_attacking() { return attacking; }
+            static void set_attacking(int value) { attacking = value; }
+            
+            static int get_castling_importance() { return castling_importance; }
+            static void set_castling_importance(int value) { castling_importance = value; }
+            
+            // Функция применения тактических модификаций
+            static Value apply_tactical_adjustments(const Position& pos, Value v);
+            
+        private:
+            static int aggressiveness;
+            static int tactical_awareness;
+            static int piece_activity;
+            static int king_safety;
+            static int pawn_structure;
+            static int attacking;
+            static int castling_importance;
+        };
+        
+        } // namespace Stockfish
+        EOF
+        
+        # 2. СОЗДАЕМ ФАЙЛ TACTICAL_FISHER.CPP
+        cat > tactical_fisher.cpp << 'EOF'
+        #include "tactical_fisher.h"
+        #include "position.h"
+        #include "evaluate.h"
+        
+        namespace Stockfish {
+        
+        // Инициализация параметров по умолчанию
+        int TacticalFisher::aggressiveness = 150;
+        int TacticalFisher::tactical_awareness = 200;
+        int TacticalFisher::piece_activity = 130;
+        int TacticalFisher::king_safety = 90;
+        int TacticalFisher::pawn_structure = 70;
+        int TacticalFisher::attacking = 120;
+        int TacticalFisher::castling_importance = 60;
+        
+        Value TacticalFisher::apply_tactical_adjustments(const Position& pos, Value v) {
+            // Применяем тактические модификации к оценке
+            Value adjusted = v;
+            
+            // Агрессивность: увеличиваем оценку при атаке
+            if (pos.checkers_to(pos.side_to_move())) {
+                adjusted += Value(aggressiveness * 0.8);
+            }
+            
+            // Активность фигур: бонус за мобильность
+            int mobility = pos.count_mobility(pos.side_to_move());
+            adjusted += Value(mobility * piece_activity * 0.1);
+            
+            // Тактическая осведомленность: бонус за тактические возможности
+            if (pos.has_legal_moves()) {
+                adjusted += Value(tactical_awareness * 0.5);
+            }
+            
+            // Безопасность короля: штраф за открытого короля
+            if (!pos.has_shelter(pos.side_to_move())) {
+                adjusted -= Value(king_safety * 2);
+            }
+            
+            return adjusted;
+        }
+        
+        } // namespace Stockfish
+        EOF
+        
+        # 3. МОДИФИЦИРУЕМ ENGINE.CPP (добавляем опции)
+        sed -i '/"MultiPV", Option(1, 1, MAX_MOVES)/a\
+    options.add("Aggressiveness", Option(150, 0, 200, [](const Option\& o) {\
+        TacticalFisher::set_aggressiveness(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("Tactical Awareness", Option(200, 0, 300, [](const Option\& o) {\
+        TacticalFisher::set_tactical_awareness(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("Piece Activity", Option(130, 0, 200, [](const Option\& o) {\
+        TacticalFisher::set_piece_activity(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("King Safety", Option(90, 0, 200, [](const Option\& o) {\
+        TacticalFisher::set_king_safety(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("Pawn Structure", Option(70, 0, 200, [](const Option\& o) {\
+        TacticalFisher::set_pawn_structure(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("Attacking", Option(120, 0, 200, [](const Option\& o) {\
+        TacticalFisher::set_attacking(int(o));\
+        return std::nullopt;\
+    }));\
+    options.add("Castling Importance", Option(60, 0, 100, [](const Option\& o) {\
+        TacticalFisher::set_castling_importance(int(o));\
+        return std::nullopt;\
+    }));' engine.cpp
+        
+        # 4. ДОБАВЛЯЕМ INCLUDE В ENGINE.CPP
+        sed -i '1i #include "tactical_fisher.h"' engine.cpp
+        
+        # 5. МОДИФИЦИРУЕМ EVALUATE.CPP
+        sed -i '/return v;/i \
+    // ТАКТИЧЕСКИЕ МОДИФИКАЦИИ\
+    v = TacticalFisher::apply_tactical_adjustments(pos, v);' evaluate.cpp
+        
+        sed -i '1i #include "tactical_fisher.h"' evaluate.cpp
+        
+        echo "Тактические модификации созданы!"
+        
+    - name: Build custom Stockfish
+      run: |
+        cd Stockfish/src
+        # Компилируем с поддержкой AVX2
+        make build ARCH=x86-64-avx2 -j4
+        
+    - name: Create Windows executable (кросс-компиляция)
+      run: |
+        cd Stockfish/src
+        # Для Windows нужно mingw, но для теста создаем Linux версию
+        # Позже добавим Windows кросс-компиляцию
+        echo "Сборка завершена! Файл: stockfish"
+        
+    - name: Create complete UCI config
+      run: |
+        cat > stockfish_custom.uci << 'EOF'
+        # ============================================
+        # КАСТОМНЫЙ ТАКТИЧЕСКИЙ STOCKFISH 2026
+        # ============================================
+        
+        # СТАНДАРТНЫЕ ПАРАМЕТРЫ
+        setoption name MultiPV value 256
+        setoption name UCI_Chess960 value true
+        setoption name Threads value 4
+        setoption name Hash value 2048
+        setoption name Move Overhead value 3000
+        setoption name Slow Mover value 80
+        
+        # ТАКТИЧЕСКИЕ ПАРАМЕТРЫ (КАСТОМНЫЕ!)
+        setoption name Aggressiveness value 150
+        setoption name Tactical Awareness value 200
+        setoption name Piece Activity value 130
+        setoption name King Safety value 90
+        setoption name Pawn Structure value 70
+        setoption name Attacking value 120
+        setoption name Castling Importance value 60
+        
+        # АКТИВАЦИЯ
+        uci
+        isready
+        EOF
+        
+    - name: Upload custom Stockfish
       uses: actions/upload-artifact@v4
       with:
-        name: stockfish-windows
-        path: Stockfish/stockfish-windows-x86-64-avx2.exe
-        
-    - name: Upload configuration files
-      uses: actions/upload-artifact@v4
-      with:
-        name: stockfish-configs
+        name: tactical-stockfish-linux
         path: |
-          stockfish_tactical.uci
-          start_tactical.bat
+          Stockfish/src/stockfish
+          stockfish_custom.uci
+        
+    - name: Create Windows cross-build (дополнительно)
+      if: false  # Пока отключено, включаем позже
+      run: |
+        echo "Windows сборка будет в следующей версии"
