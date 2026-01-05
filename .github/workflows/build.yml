@@ -1,24 +1,49 @@
-name: Build Stockfish
+name: Build Tactical Stockfish
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  build-windows:
+    runs-on: windows-latest
     
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Test message
-      run: echo "✅ GitHub Actions работает!"
-      
-    - name: Create test file
-      run: echo "Тест успешен" > test.txt
-      
-    - name: Upload result
+    - name: Setup MSYS2 and GCC
+      run: |
+        choco install -y msys2
+        C:\msys64\usr\bin\bash -lc "pacman -S --noconfirm git mingw-w64-x86_64-gcc mingw-w64-x86_64-make"
+        
+    - name: Clone Stockfish
+      run: |
+        git clone --depth 1 https://github.com/official-stockfish/Stockfish.git
+        cd Stockfish/src
+        
+    - name: Build Stockfish
+      shell: cmd
+      run: |
+        cd Stockfish\src
+        C:\msys64\usr\bin\bash -lc "cd /c/Users/runneradmin/Stockfish/src && make build ARCH=x86-64-avx2 COMP=mingw -j4"
+        
+    - name: Upload Stockfish executable
       uses: actions/upload-artifact@v4
       with:
-        name: test-result
-        path: test.txt
+        name: stockfish-windows
+        path: Stockfish/src/stockfish*.exe
+        
+    - name: Create default config
+      run: |
+        echo "setoption name MultiPV value 500" > stockfish_config.ini
+        echo "setoption name UCI_Chess960 value true" >> stockfish_config.ini
+        echo "setoption name Contempt value 24" >> stockfish_config.ini
+        echo "setoption name Aggressiveness value 150" >> stockfish_config.ini
+        
+    - name: Upload config
+      uses: actions/upload-artifact@v4
+      with:
+        name: stockfish-config
+        path: stockfish_config.ini
