@@ -6,17 +6,17 @@ on:
     branches: [main]
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build-ubuntu:
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Setup MSYS2 and GCC
+    - name: Install dependencies
       run: |
-        choco install -y msys2
-        C:\msys64\usr\bin\bash -lc "pacman -S --noconfirm git mingw-w64-x86_64-gcc mingw-w64-x86_64-make"
+        sudo apt-get update
+        sudo apt-get install -y git g++ make
         
     - name: Clone Stockfish
       run: |
@@ -24,18 +24,17 @@ jobs:
         cd Stockfish/src
         
     - name: Build Stockfish
-      shell: cmd
       run: |
-        cd Stockfish\src
-        C:\msys64\usr\bin\bash -lc "cd /c/Users/runneradmin/Stockfish/src && make build ARCH=x86-64-avx2 COMP=mingw -j4"
+        cd Stockfish/src
+        make build ARCH=x86-64-avx2 -j4
         
-    - name: Upload Stockfish executable
+    - name: Upload Stockfish binary
       uses: actions/upload-artifact@v4
       with:
-        name: stockfish-windows
-        path: Stockfish/src/stockfish*.exe
+        name: stockfish-linux
+        path: Stockfish/src/stockfish
         
-    - name: Create default config
+    - name: Create config with MultiPV=500
       run: |
         echo "setoption name MultiPV value 500" > stockfish_config.ini
         echo "setoption name UCI_Chess960 value true" >> stockfish_config.ini
